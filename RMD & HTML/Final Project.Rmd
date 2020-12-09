@@ -1,0 +1,398 @@
+---
+title: "Final Project"
+author: "Rene Villarreal"
+output: 
+  html_notebook: 
+    toc: true
+---
+
+# Preparing R Studio
+<br>
+
+## Install Libraries
+```{r}
+library(vosonSML)
+library(tidyverse)
+library(tidytext)
+library(quanteda)
+library(syuzhet)
+library(reshape2)
+library(lda)
+library(jsonlite)
+library(stringr)
+library(tm)
+library(rtweet)
+library(ggplot2)
+library(lubridate)
+library(hms)
+library(caTools)
+library(caret)
+library(e1071)
+library(rpart)
+library(rpart.plot)
+library(party)
+library(forecast)
+library(arules)
+```
+
+# AWS
+<br>
+
+## RDBS Connection
+```{r}
+host = "text-analysis.cpkypoj1gkct.us-east-1.rds.amazonaws.com"
+port = 3306
+user = "rvillarreal"
+password = "x10809877"
+
+my_instance = DBI :: dbConnect(
+  RMySQL :: MySQL(),
+  host = host,
+  port = port,
+  user = user,
+  password = password
+)
+```
+
+
+## Creating Database
+```{r}
+dbSendQuery(my_instance, "CREATE DATABASE TWEETS")
+```
+
+
+## Database Connection
+```{r}
+dbname = "TWEETS"
+
+con = DBI :: dbConnect(
+  RMySQL :: MySQL(),
+  dbname = dbname,
+  host = host,
+  port = port,
+  user = user,
+  password = password
+)
+```
+
+# Twitter
+
+<br>
+
+## API Connection
+```{r}
+consumer_key <- "R7gjfyZMLN2vK6iFlQf2hhCPw"
+consumer_secret <- "Zr5BqyPKPzkfMpAi3HijHk5HNFgNffvisPDAiSwd9fLyDKB3Il"
+access_token <- "1326312317705916416-6estSlWdrKq26zO5blGoD1OaOVfLCV"
+access_secret <- "Jh4UgN83EZWV4wLQmjkJZkKdZz0ByNe5kl3q1qHowb81L"
+
+twitter_token <- create_token(
+  app = "Programming_Data_Analytics",
+  consumer_key = consumer_key,
+  consumer_secret = consumer_secret,
+  access_token = access_token,
+  access_secret = access_secret
+)
+
+setup_twitter_oauth(consumer_key, consumer_secret, access_token, access_secret)
+```
+
+## Tweets Extraction and CSV
+```{r}
+#messi_tweets9 <- search_tweets("messi OR MESSI OR Messi", n = 18000, lang = "en", include_rts = F)
+
+messi_tweets_final <- data.frame(unique(rbind(messi_tweets3, messi_tweets2, messi_tweets, messi_tweets4, messi_tweets5, messi_tweets6, messi_tweets7, messi_tweets8, messi_tweets9)))
+
+messi_tweets_final <- messi_tweets_final %>%
+                      separate(created_at, into = c("Date", "Time"), sep = " ", convert = TRUE)
+
+messi_tweets_final$Time <- as.hms(messi_tweets_final$Time)
+messi_tweets_final$Date <- as.Date(messi_tweets_final$Date)
+
+write.csv(apply(messi_tweets_final,2,as.character), "/Users/renevillarreal/Desktop/STU/Programming for Data Analytics/messi_tweets_final.csv")
+```
+
+## Tweets Final Data Frame
+```{r}
+Messi_Final_Project <- read.csv("messi_tweets_final.csv")
+Messi_Final_Project
+```
+
+# Final Dataset for Analysis
+
+<br>
+
+## Storing & Extracting from Database
+```{r}
+#dbCreateTable(con, "fct_tweets", Messi_Final_Project, row.names = NULL)
+#dbWriteTable(con, "fct_tweets", Messi_Final_Project, append = T, row.names = F)
+
+#final_data <- dbReadTable(con, "fct_tweets")
+#final_data
+```
+
+## Prepare Dataset
+
+```{r}
+final_data <- final_data %>% 
+              separate(created_at, into = c("Date", "Time"), sep = " ", convert = TRUE)
+
+final_data$Time <- as.hms(final_data$Time)
+final_data$Date <- as.Date(final_data$Date)
+
+final_data <- final_data %>% 
+              select(user_id, status_id, Date, Time, screen_name, text, source, display_text_width, reply_to_status_id, is_quote, 
+                     favorite_count, retweet_count, hashtags, symbols, lang, name, location, description, protected, followers_count, 
+                     friends_count, listed_count, statuses_count, favourites_count, account_created_at, verified, reply_to_status_id)
+
+final_data
+```
+
+# Analysis
+<br>
+
+
+## Problem Statement
+
+Classify if a tweet was made from an Apple device or not given the follower count and friends count. Determine which model is best using Accuracy, Precision, and Recall.
+
+## Logistic Regression Model
+
+```{r}
+# Data Prep
+final_data_logistic <- mutate(final_data, Source_Class = ifelse(source == "Twitter for iPhone" | source == "Twitter for iPad" | source == "Twitter for Mac" | source == "Twitter for i?S", 
+                                                "Apple", "Non_Apple")
+                     )
+
+final_data_logistic$Source_Class <- factor(final_data_logistic$Source_Class, levels=c("Non_Apple", "Apple"))
+
+
+# Sample, Test & Train
+set.seed(305)
+
+final_data_logistic$sample <- sample.split(final_data_logistic$Source_Class, SplitRatio = .80)
+
+train_log <- subset(final_data_logistic, sample == TRUE)
+test_log <- subset(final_data_logistic, sample == FALSE)
+
+
+# GLM Model
+log_model <- glm(formula = Source_Class ~ followers_count + friends_count,
+               data = train_log,
+               family = binomial)
+
+
+# Prediction
+test_log$SourceProbability <- predict(log_model, test_log, type = "response")
+
+
+# Classification
+test_log <- mutate(test_log,
+               PredictedSource = ifelse(SourceProbability < 0.5, "Non_Apple", "Apple"))
+
+test_log$PredictedSource <- factor(test_log$PredictedSource, levels = c("Non_Apple", "Apple"))
+
+
+# Metrics
+Accuracy_Log <- confusionMatrix(test_log$Source_Class, test_log$PredictedSource)[["overall"]][["Accuracy"]]
+Precision_Log <- precision(test_log$Source_Class, test_log$PredictedSource)
+Recall_Log <- recall(test_log$Source_Class, test_log$PredictedSource)
+
+cat("\n", "The Accurracy of the Logistic Regression Model is:", Accuracy_Log, "\n")
+cat("The Precision of the Logistic Regression Model is:", Precision_Log, "\n")
+cat("The Recall of the Logistic Regression Model is:", Recall_Log, "\n")
+```
+
+## CTREE Model
+
+```{r}
+# Data Prep
+final_data_ctree <- mutate(final_data, Source_Class = ifelse(source == "Twitter for iPhone" | source == "Twitter for iPad" | source == "Twitter for Mac" | source == "Twitter for i?S", 
+                                                "Apple", "Non_Apple")
+                     )
+
+final_data_ctree$Source_Class <- factor(final_data_ctree$Source_Class, levels=c("Non_Apple", "Apple"))
+
+
+# Sample, Test & Train
+set.seed(305)
+
+final_data_ctree$sample <- sample.split(final_data_ctree$Source_Class, SplitRatio = .80)
+
+train_ctree <- subset(final_data_ctree, sample == TRUE)
+test_ctree <- subset(final_data_ctree, sample == FALSE)
+
+
+# CTREE Model
+ctree_model <- ctree(formula = Source_Class ~ followers_count + friends_count, train_ctree)
+
+
+# Plot Model
+plot(ctree_model)
+
+
+# Prediction
+Predicted_CTREE <- predict(ctree_model, test_ctree)
+
+
+# Metrics
+Accuracy_CTREE <- confusionMatrix(test_ctree$Source_Class, Predicted_CTREE)[["overall"]][["Accuracy"]]
+Precision_CTREE <- precision(test_ctree$Source_Class, Predicted_CTREE)
+Recall_CTREE <- recall(test_ctree$Source_Class, Predicted_CTREE)
+
+cat("The Accurracy of the CTREE Model is:", Accuracy_CTREE, "\n")
+cat("The Precision of the CTREE Model is:", Precision_CTREE, "\n")
+cat("The Recall of the CTREE Model is:", Recall_CTREE, "\n")
+```
+
+## CART Model
+
+```{r}
+# Data Prep
+final_data_cart <- mutate(final_data, Source_Class = ifelse(source == "Twitter for iPhone" | source == "Twitter for iPad" | source == "Twitter for Mac" | source == "Twitter for i?S", 
+                                                "Apple", "Non_Apple")
+                     )
+
+final_data_cart$Source_Class <- factor(final_data_cart$Source_Class, levels=c("Non_Apple", "Apple"))
+
+
+# Sample, Test & Train
+set.seed(305)
+
+final_data_cart$sample <- sample.split(final_data_cart$Source_Class, SplitRatio = .80)
+
+train_cart <- subset(final_data_cart, sample == TRUE)
+test_cart <- subset(final_data_cart, sample == FALSE)
+
+
+# CART Model
+cart_model <- rpart(formula = Source_Class ~ followers_count + friends_count, train_cart)
+
+
+# Plot Model
+rpart.plot(cart_model)
+
+
+# Prediction
+Predicted_CART <- predict(cart_model, test_cart, type = "class")
+table(test_cart$Source_Class, Predicted_CART, dnn = c("Actual", "Prediction"))
+
+
+# Metrics
+Accuracy_CART <- confusionMatrix(test_cart$Source_Class, Predicted_CART)[["overall"]][["Accuracy"]]
+Precision_CART <- precision(test_cart$Source_Class, Predicted_CART)
+Recall_CART <- recall(test_cart$Source_Class, Predicted_CART)
+
+cat("The Accurracy of the CART Model is:", Accuracy_CART, "\n")
+cat("The Precision of the CART Model is:", Precision_CART, "\n")
+cat("The Recall of the CART Model is:", Recall_CART, "\n")
+```
+
+## Naive Bayes Model
+
+```{r}
+# Data Prep
+final_data_nb <- mutate(final_data, Source_Class = ifelse(source == "Twitter for iPhone" | source == "Twitter for iPad" | source == "Twitter for Mac" | source == "Twitter for i?S", 
+                                                "Apple", "Non_Apple")
+                     )
+
+final_data_nb$Source_Class <- factor(final_data_nb$Source_Class, levels=c("Non_Apple", "Apple"))
+
+
+# Sample, Test & Train
+set.seed(305)
+
+final_data_nb$sample <- sample.split(final_data_nb$Source_Class, SplitRatio = .80)
+
+train_nb <- subset(final_data_nb, sample == TRUE)
+test_nb <- subset(final_data_nb, sample == FALSE)
+
+
+# Naive Bayes Model
+nb_model <- naiveBayes(Source_Class ~ followers_count + friends_count, train_nb)
+
+
+# Prediction
+Predicted_NB <- predict(nb_model, test_nb, type = "class")
+table(test_nb$Source_Class, Predicted_NB, dnn = c("Actual", "Prediction"))
+
+
+# Metrics
+Accuracy_NB <- confusionMatrix(test_nb$Source_Class, Predicted_NB)[["overall"]][["Accuracy"]]
+Precision_NB <- precision(test_nb$Source_Class, Predicted_NB)
+Recall_NB <- recall(test_nb$Source_Class, Predicted_NB)
+
+cat("The Accurracy of the Naive Bayes Model is:", Accuracy_NB, "\n")
+cat("The Precision of the Naive Bayes Model is:", Precision_NB, "\n")
+cat("The Recall of the Naive Bayes Model is:", Recall_NB, "\n")
+```
+
+## Conclusion
+The CART Model is the best model to use. It has the highest Accuracy and Recall, with the second highest Precision.
+
+<br>
+
+# Time Series
+
+```{r}
+# Time Series Data Frame
+final_data_ts <- messi_tweets_final %>%
+                 mutate(source2 = ifelse(source == "Twitter for iPhone" | source == "Twitter for iPad" | source == "Twitter for Mac" | source == "Twitter for i?S", "Apple", "Non_Apple")) %>%
+                 filter(source2 == "Apple") %>%
+                 select(source, source2, Date, Time) %>%
+                 arrange(Date, Time)
+
+
+# Hour and Date Breakout
+final_data_ts$Time <- hour(as.hms(final_data_ts$Time))
+final_data_ts$Date <- as.numeric(as.Date(final_data_ts$Date))
+
+
+# Counting Instances
+final_data_ts <- final_data_ts %>%
+  arrange(Date, Time) %>%
+  group_by(Date, Time) %>%
+  summarize(count= n())
+
+
+# Time Series Model
+model_ts <-  ts(final_data_ts$count, start = c(18588, 16), end = c(18602, 23), frequency = 24)
+
+
+# Decomposition
+plot(decompose(model_ts))
+
+
+# ARIMA Model
+arima_messi <- auto.arima(model_ts)
+
+
+# Prediction: 7 days
+forecast_ts <- forecast(arima_messi, h = 168)
+
+
+# Forecast Plot
+plot(forecast_ts)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
