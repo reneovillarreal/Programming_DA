@@ -10,10 +10,6 @@ There are two folders: **RMD & HTML**, and **Presentation**
 **RMD & HTML**: Contains the .rmd file used to create the project, as well as the HTML\
 **Presentation**: Contains the final keynote presentation
 
-# HTML Link
-
-https://reneovillarreal.github.io/Fundamentals-of-Big-Data/index.html
-
 # Dataset
 
 The data used for this project is from Twitter Developer App using an API Connection.
