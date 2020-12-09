@@ -7,7 +7,7 @@ My final project was built in R Studio.
 
 There are two folders: **RMD & HTML**, and **Presentation**
 
-**RMD**: Contains the .rmd file used to create the project, as well as the HTML\
+**RMD & HTML**: Contains the .rmd file used to create the project, as well as the HTML\
 **Presentation**: Contains the final keynote presentation
 
 # HTML Link
